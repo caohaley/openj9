@@ -45,6 +45,7 @@ CONFIGURE_ARGS += \
   --enable-OMR_GC_REALTIME \
   --enable-OMR_GC_VLHGC \
   --enable-OMR_PORT_ASYNC_HANDLER \
+  --enable-OMR_PORT_SOCK_SUPPORT \
   --enable-OMR_THR_CUSTOM_SPIN_OPTIONS \
   --enable-OMR_NOTIFY_POLICY_CONTROL
 
