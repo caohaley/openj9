@@ -20,19 +20,11 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#include <arpa/inet.h>
 #include <chrono>
 #include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>	/* for TCP_NODELAY option */
 #include <openssl/err.h>
 #include <poll.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/un.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h> /// gethostname, read, write
 #include "control/CompilationRuntime.hpp"
 #include "env/TRMemory.hpp"
@@ -135,13 +127,13 @@ createSSLContext(TR::PersistentInfo *info)
    }
 
 static bool
-handleOpenSSLConnectionError(int connfd, SSL *&ssl, BIO *&bio, const char *errMsg)
+handleOpenSSLConnectionError(omrsock_socket_t socket, SSL *&ssl, BIO *&bio, const char *errMsg)
    {
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
        TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "%s: errno=%d", errMsg, errno);
    (*OERR_print_errors_fp)(stderr);
 
-   close(connfd);
+   omrsock_close(socket);
    if (bio)
       {
       (*OBIO_free_all)(bio);
@@ -156,30 +148,30 @@ handleOpenSSLConnectionError(int connfd, SSL *&ssl, BIO *&bio, const char *errMs
    }
 
 static bool
-acceptOpenSSLConnection(SSL_CTX *sslCtx, int connfd, BIO *&bio)
+acceptOpenSSLConnection(SSL_CTX *sslCtx, omrsock_socket_t socket, BIO *&bio)
    {
    SSL *ssl = (*OSSL_new)(sslCtx);
    if (!ssl)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error creating SSL connection");
+      return handleOpenSSLConnectionError(socket, ssl, bio, "Error creating SSL connection");
 
    (*OSSL_set_accept_state)(ssl);
 
-   if ((*OSSL_set_fd)(ssl, connfd) != 1)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error setting SSL file descriptor");
+   if ((*OSSL_set_fd)(ssl, socket->data) != 1)
+      return handleOpenSSLConnectionError(socket, ssl, bio, "Error setting SSL file descriptor");
 
    if ((*OSSL_accept)(ssl) <= 0)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error accepting SSL connection");
+      return handleOpenSSLConnectionError(socket, ssl, bio, "Error accepting SSL connection");
 
    bio = (*OBIO_new_ssl)(sslCtx, false);
    if (!bio)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error creating new BIO");
+      return handleOpenSSLConnectionError(socket, ssl, bio, "Error creating new BIO");
 
    if ((*OBIO_ctrl)(bio, BIO_C_SET_SSL, true, (char *)ssl) != 1) // BIO_set_ssl(bio, ssl, true)
-      return handleOpenSSLConnectionError(connfd, ssl, bio, "Error setting BIO SSL");
+      return handleOpenSSLConnectionError(socket, ssl, bio, "Error setting BIO SSL");
 
    if (TR::Options::getVerboseOption(TR_VerboseJITServer))
       TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "SSL connection on socket 0x%x, Version: %s, Cipher: %s\n",
-                                                     connfd, (*OSSL_get_version)(ssl), (*OSSL_get_cipher)(ssl));
+                                                     socket->data, (*OSSL_get_version)(ssl), (*OSSL_get_cipher)(ssl));
    return true;
    }
 
@@ -203,7 +195,7 @@ TR_Listener::serveRemoteCompilationRequests(BaseCompileDispatcher *compiler)
    uint32_t port = info->getJITServerPort();
    uint32_t timeoutMs = info->getSocketTimeout();
    struct pollfd pfd = {0};
-   int sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+   int sockfd = omrsock_socket(OMRSOCK_AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
    if (sockfd < 0)
       {
       perror("can't open server socket");

@@ -71,7 +71,7 @@ public:
       @param ssl  BIO for the SSL enabled stream
       @param timeout timeout value (ms) to be set for connfd
    */
-   explicit ServerStream(int connfd, BIO *ssl);
+   explicit ServerStream(omrsock_socket_t socket, BIO *ssl);
    virtual ~ServerStream()
       {
       _numConnectionsClosed++;
