@@ -26,10 +26,11 @@
 #include <unistd.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "env/CompilerEnv.hpp"
 #include "net/LoadSSLLibs.hpp"
 #include "net/Message.hpp"
 #include "infra/Statistics.hpp"
-
+#include "omrportsocktypes.h"
 
 namespace JITServer
 {
@@ -64,7 +65,7 @@ public:
 protected:
    CommunicationStream() :
       _ssl(NULL),
-      _connfd(-1)
+      _socket(NULL)
       {
       static_assert(
          sizeof(messageNames) / sizeof(messageNames[0]) == MessageType_ARRAYSIZE,
@@ -73,16 +74,19 @@ protected:
 
    virtual ~CommunicationStream()
       {
-      if (_connfd != -1)
-         close(_connfd);
+      if (_socket != NULL)
+         {
+         OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+         omrsock_close(&_socket);
+         }
 
       if (_ssl)
          (*OBIO_free_all)(_ssl);
       }
 
-   void initStream(int connfd, BIO *ssl)
+   void initStream(omrsock_socket_t socket, BIO *ssl)
       {
-      _connfd = connfd;
+      _socket = socket;
       _ssl = ssl;
       }
 
@@ -94,10 +98,14 @@ protected:
    void readMessage2(Message &msg);
    void writeMessage(Message &msg);
 
-   int getConnFD() const { return _connfd; }
+   int getConnFD() const
+      {
+      OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+      return omrsock_socket_getfd(_socket);
+      }
    
    BIO *_ssl; // SSL connection, null if not using SSL
-   int _connfd;
+   omrsock_socket_t _socket;
    ServerMessage _sMsg;
    ClientMessage _cMsg;
 
@@ -138,7 +146,8 @@ private:
          int32_t totalBytesRead = 0;
          while (totalBytesRead < size)
             {
-            int32_t bytesRead = read(_connfd, data + totalBytesRead, size - totalBytesRead);
+            OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+            int32_t bytesRead = omrsock_recv(_socket, (uint8_t *)data + totalBytesRead, size - totalBytesRead, 0);
             if (bytesRead <= 0)
                {
                throw JITServer::StreamFailure("JITServer I/O error: read error");
@@ -157,7 +166,8 @@ private:
          }
       else
          {
-         bytesRead = read(_connfd, data, size);
+         OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+         bytesRead = omrsock_recv(_socket, (uint8_t *)data, size, 0);
          }
 
       if (bytesRead <= 0)
@@ -200,7 +210,8 @@ private:
          int32_t totalBytesWritten = 0;
          while (totalBytesWritten < size)
             {
-            int32_t bytesWritten = write(_connfd, data + totalBytesWritten, size - totalBytesWritten);
+            OMRPORT_ACCESS_FROM_OMRPORT(TR::Compiler->omrPortLib);
+            int32_t bytesWritten = omrsock_send(_socket, (uint8_t *)(data + totalBytesWritten), size - totalBytesWritten, 0);
             if (bytesWritten <= 0)
                {
                throw JITServer::StreamFailure("JITServer I/O error: write error");
